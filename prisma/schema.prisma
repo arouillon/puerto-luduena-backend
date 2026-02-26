@@ -1,0 +1,404 @@
+// prisma/schema.prisma
+// Puerto Ludueña — Modelo de datos v1
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ──────────────────────────────────────
+
+enum Role {
+  CLIENT
+  GATEKEEPER
+  OPERATOR
+  ADMIN
+}
+
+enum VesselType {
+  LANCHA
+  VELERO
+  KAYAK
+  OTHER
+}
+
+enum MemberStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+}
+
+enum DocumentType {
+  INSURANCE
+  NAUTICAL_LICENSE
+  TECHNICAL_REVIEW
+  OTHER
+}
+
+enum DocumentStatus {
+  VALID
+  EXPIRING_SOON
+  EXPIRED
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  IN_WATER
+  RETURNED
+  CANCELLED
+}
+
+enum AccessType {
+  QR_RESERVATION
+  QR_AUTHORIZATION
+  MANUAL
+}
+
+enum AccessDirection {
+  ENTRY
+  EXIT
+}
+
+enum AuthorizationType {
+  NAVIGATOR
+  TECHNICIAN
+}
+
+enum OtpType {
+  REGISTER
+  PASSWORD_RESET
+}
+
+enum ConfigType {
+  INT
+  FLOAT
+  STRING
+  BOOLEAN
+}
+
+enum NotificationType {
+  RESERVATION_CONFIRMED
+  VESSEL_LAUNCHED
+  RETURN_REMINDER
+  DOC_EXPIRING
+  ACCESS_ENTRY
+  ACCESS_EXIT
+  AUTHORIZATION_CREATED
+  AUTHORIZATION_REVOKED
+  BROADCAST
+  CONFLICT_BLOCKED
+}
+
+// ─── IDENTIDAD ──────────────────────────────────
+
+model User {
+  id           String    @id @default(uuid())
+  email        String?   @unique
+  phone        String?   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  dni          String?
+  role         Role      @default(CLIENT)
+  isVerified   Boolean   @default(false)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  otpCodes                OtpCode[]
+  refreshTokens           RefreshToken[]
+  pushSubs                PushSubscription[]
+  vesselMembers           VesselMember[]
+  reservations            Reservation[]     @relation("ReservationCreatedBy")
+  cancelledRes            Reservation[]     @relation("ReservationCancelledBy")
+  botados                 BotadoEvent[]     @relation("BotadoOperator")
+  reassignedBotados       BotadoEvent[]     @relation("BotadoReassignedFrom")
+  accessAsGatekeeper      AccessLog[]       @relation("AccessGatekeeper")
+  accessAsVisitor         AccessLog[]       @relation("AccessUser")
+  authorizationsGranted   Authorization[]   @relation("AuthGrantedBy")
+  authorizationsReceived  Authorization[]   @relation("AuthGrantedTo")
+  authorizationsRevoked   Authorization[]   @relation("AuthRevokedBy")
+  notifications           Notification[]
+  configUpdates           SystemConfig[]
+  uploadedDocuments       Document[]
+
+  @@index([role])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model OtpCode {
+  id        String   @id @default(uuid())
+  userId    String
+  code      String
+  type      OtpType
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("otp_codes")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String
+  deviceInfo String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model PushSubscription {
+  id         String    @id @default(uuid())
+  userId     String
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+// ─── EMBARCACIONES ───────────────────────────────
+
+model Vessel {
+  id              String    @id @default(uuid())
+  name            String
+  registration    String    @unique
+  type            VesselType
+  brand           String?
+  model           String?
+  year            Int?
+  photoUrl        String?
+  berth           String?
+  mooringZone     String?
+  hasRestriction  Boolean   @default(false)
+  restrictionNote String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  members        VesselMember[]
+  documents      Document[]
+  reservations   Reservation[]
+  authorizations Authorization[]
+  accessLogs     AccessLog[]
+
+  @@index([hasRestriction])
+  @@index([deletedAt])
+  @@map("vessels")
+}
+
+model VesselMember {
+  id         String        @id @default(uuid())
+  userId     String
+  vesselId   String
+  status     MemberStatus  @default(PENDING)
+  invitedBy  String?
+  invitedAt  DateTime?
+  acceptedAt DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime      @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  vessel Vessel @relation(fields: [vesselId], references: [id])
+
+  @@unique([userId, vesselId])
+  @@index([vesselId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("vessel_members")
+}
+
+model Document {
+  id         String         @id @default(uuid())
+  vesselId   String
+  uploadedBy String
+  type       DocumentType
+  label      String?
+  fileUrl    String
+  fileType   String
+  expiresAt  DateTime
+  status     DocumentStatus @default(VALID)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  deletedAt  DateTime?
+
+  vessel   Vessel @relation(fields: [vesselId], references: [id])
+  uploader User   @relation(fields: [uploadedBy], references: [id])
+
+  @@index([vesselId, type])
+  @@index([expiresAt])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("documents")
+}
+
+// ─── OPERACIONES ─────────────────────────────────
+
+model Reservation {
+  id               String            @id @default(uuid())
+  vesselId         String
+  createdBy        String
+  authorizationId  String?
+  status           ReservationStatus @default(PENDING)
+  estimatedArrival DateTime
+  estimatedReturn  DateTime
+  passengerCount   Int               @default(1)
+  navigationZone   String?
+  notes            String?
+  cancelledAt      DateTime?
+  cancelledBy      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  vessel        Vessel         @relation(fields: [vesselId], references: [id])
+  creator       User           @relation("ReservationCreatedBy", fields: [createdBy], references: [id])
+  canceller     User?          @relation("ReservationCancelledBy", fields: [cancelledBy], references: [id])
+  authorization Authorization? @relation(fields: [authorizationId], references: [id])
+  botadoEvent   BotadoEvent?
+  accessLogs    AccessLog[]
+
+  @@index([vesselId, estimatedArrival])
+  @@index([status])
+  @@index([createdBy])
+  @@index([estimatedArrival])
+  @@map("reservations")
+}
+
+model BotadoEvent {
+  id              String    @id @default(uuid())
+  reservationId   String    @unique
+  operatorId      String
+  alertSentAt     DateTime
+  acceptedAt      DateTime
+  launchedAt      DateTime?
+  responseTimeSec Int?
+  reassignedFrom  String?
+  reassignNote    String?
+  createdAt       DateTime  @default(now())
+
+  reservation  Reservation @relation(fields: [reservationId], references: [id])
+  operator     User        @relation("BotadoOperator", fields: [operatorId], references: [id])
+  prevOperator User?       @relation("BotadoReassignedFrom", fields: [reassignedFrom], references: [id])
+
+  @@index([operatorId])
+  @@index([acceptedAt])
+  @@map("botado_events")
+}
+
+model AccessLog {
+  id              String          @id @default(uuid())
+  gatekeeperId    String
+  personName      String
+  personDoc       String?
+  userId          String?
+  vesselId        String?
+  reservationId   String?
+  authorizationId String?
+  accessType      AccessType
+  direction       AccessDirection
+  enteredAt       DateTime        @default(now())
+  exitedAt        DateTime?
+  notes           String?
+
+  gatekeeper    User           @relation("AccessGatekeeper", fields: [gatekeeperId], references: [id])
+  user          User?          @relation("AccessUser", fields: [userId], references: [id])
+  vessel        Vessel?        @relation(fields: [vesselId], references: [id])
+  reservation   Reservation?   @relation(fields: [reservationId], references: [id])
+  authorization Authorization? @relation(fields: [authorizationId], references: [id])
+
+  @@index([vesselId, enteredAt])
+  @@index([enteredAt])
+  @@index([exitedAt])
+  @@index([userId])
+  @@map("access_log")
+}
+
+// ─── COMUNICACIÓN ────────────────────────────────
+
+model Authorization {
+  id           String            @id @default(uuid())
+  vesselId     String
+  grantedBy    String
+  grantedTo    String?
+  granteeEmail String?
+  granteePhone String?
+  granteeName  String
+  type         AuthorizationType
+  purpose      String?
+  validFrom    DateTime
+  validUntil   DateTime
+  revokedAt    DateTime?
+  revokedBy    String?
+  createdAt    DateTime          @default(now())
+
+  vessel       Vessel        @relation(fields: [vesselId], references: [id])
+  granter      User          @relation("AuthGrantedBy", fields: [grantedBy], references: [id])
+  grantee      User?         @relation("AuthGrantedTo", fields: [grantedTo], references: [id])
+  revoker      User?         @relation("AuthRevokedBy", fields: [revokedBy], references: [id])
+  reservations Reservation[]
+  accessLogs   AccessLog[]
+
+  @@index([vesselId])
+  @@index([grantedTo])
+  @@index([validFrom, validUntil])
+  @@index([revokedAt])
+  @@map("authorizations")
+}
+
+model Notification {
+  id            String           @id @default(uuid())
+  userId        String
+  type          NotificationType
+  title         String
+  body          String
+  data          Json?
+  isRead        Boolean          @default(false)
+  readAt        DateTime?
+  pushSent      Boolean          @default(false)
+  pushDelivered Boolean?
+  createdAt     DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@index([type])
+  @@map("notifications")
+}
+
+model SystemConfig {
+  key         String     @id
+  value       String
+  type        ConfigType
+  description String
+  updatedAt   DateTime   @updatedAt
+  updatedBy   String
+
+  admin User @relation(fields: [updatedBy], references: [id])
+
+  @@map("system_config")
+}
