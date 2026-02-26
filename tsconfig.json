@@ -3,7 +3,9 @@
     "target": "ES2022",
     "module": "ES2022",
     "moduleResolution": "Node",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": false,
@@ -14,49 +16,11 @@
     "sourceMap": true,
     "declaration": false
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }
-```
-
-Commit.
-
-## 2. Editar `src/routes/vessels.ts`
-
-Andá a `src` → `routes` → `vessels.ts` → lápiz.
-
-Buscá este bloque (está alrededor de la línea 50, dentro de `POST /vessels`):
-```
-    const vessel = await prisma.vessel.create({
-      data: {
-        ...parsed.data,
-        members: {
-          create: {
-            userId: request.user.sub,
-            status: 'ACTIVE',
-            acceptedAt: new Date(),
-          },
-        },
-      },
-```
-
-**Reemplazalo** por:
-```
-    const vessel = await prisma.vessel.create({
-      data: {
-        name: parsed.data.name,
-        registration: parsed.data.registration,
-        type: parsed.data.type,
-        brand: parsed.data.brand,
-        model: parsed.data.model,
-        year: parsed.data.year,
-        berth: parsed.data.berth,
-        mooringZone: parsed.data.mooringZone,
-        members: {
-          create: {
-            userId: request.user.sub,
-            status: 'ACTIVE',
-            acceptedAt: new Date(),
-          },
-        },
-      },
