@@ -51,7 +51,7 @@ async function start() {
 
   try {
     await app.listen({ port: PORT, host: HOST });
-    console.log(`Puerto Luduena API corriendo en http://${HOST}:${PORT}`);
+    console.log('Puerto Luduena API corriendo en http://' + HOST + ':' + PORT);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
